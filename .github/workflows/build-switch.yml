@@ -1,0 +1,36 @@
+name: Build Switch NRO
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkita64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends cmake ninja-build python3
+
+      - name: Build
+        run: |
+          export DEVKITPRO=/opt/devkitpro
+          export DEVKITA64=/opt/devkitpro/devkitA64
+          ./scripts/build_switch.sh
+
+      - name: Rename NRO
+        run: cp build-switch/th08.nro touhou08.nro
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: touhou08-nro
+          path: touhou08.nro

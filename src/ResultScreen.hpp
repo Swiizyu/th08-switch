@@ -1,0 +1,174 @@
+#pragma once
+
+#include "AnmManager.hpp"
+#include "Global.hpp"
+#include "ReplayManager.hpp"
+#include "ScoreDat.hpp"
+#include "ZunResult.hpp"
+#include "inttypes.hpp"
+#include "utils.hpp"
+
+namespace th08
+{
+
+enum ResultScreenState
+{
+    RESULT_SCREEN_STATE_INIT = 0,
+    RESULT_SCREEN_STATE_CHOOSING_CATEGORY = 1,
+    RESULT_SCREEN_STATE_EXITING = 2,
+    RESULT_SCREEN_STATE_BEST_SCORES_CHOOSING_DIFFICULTY = 3,
+    RESULT_SCREEN_STATE_BEST_SCORES_CHOOSING_CHARACTER = 4,
+    RESULT_SCREEN_STATE_BEST_SCORES = 5,
+    RESULT_SCREEN_STATE_SPELLCARDS_CHOOSING_DIFFICULTY = 6,
+    RESULT_SCREEN_STATE_SPELLCARDS_CHOOSING_CHARACTER = 7,
+    RESULT_SCREEN_STATE_SPELLCARDS = 8,
+    RESULT_SCREEN_STATE_WRITING_HIGHSCORE_NAME = 9,
+    RESULT_SCREEN_STATE_SAVE_REPLAY_QUESTION = 10,
+    RESULT_SCREEN_STATE_CANT_SAVE_REPLAY = 11,
+    RESULT_SCREEN_STATE_CHOOSING_REPLAY_FILE = 12,
+    RESULT_SCREEN_STATE_WRITING_REPLAY_NAME = 13,
+    RESULT_SCREEN_STATE_OVERWRITE_REPLAY_FILE = 14,
+    RESULT_SCREEN_STATE_STATS_SCREEN = 15,
+    RESULT_SCREEN_STATE_STATS_TO_SAVE_TRANSITION = 16,
+    RESULT_SCREEN_STATE_PRACTICE = 17,
+    RESULT_SCREEN_STATE_INITIAL_SCORE_SAVE = 18,
+    RESULT_SCREEN_STATE_OTHER_STATS_SCREEN_INIT = 19,
+    RESULT_SCREEN_STATE_OTHER_STATS_SCREEN = 20,
+    RESULT_SCREEN_STATE_OTHER_STATS_TO_INIT_TRANSITION = 21,
+    RESULT_SCREEN_STATE_SPELL_PRACTICE = 22,
+};
+
+enum ResultScreenRegistrationMode
+{
+    RESULT_SCREEN_REGISTER_BROWSE = 0,
+    RESULT_SCREEN_REGISTER_GAME_RESULT = 1,
+    RESULT_SCREEN_REGISTER_SAVE_DATA = 2,
+};
+
+#define RESULT_REPLAY_MAX_RESULTS 15
+
+struct ResultScreen
+{
+    ResultScreen()
+    {
+        memset(this, 0, sizeof(ResultScreen));
+    }
+
+    ~ResultScreen()
+    {
+        g_ZunMemory.Free(this->scoreDat);
+    }
+
+    static const char *GetStageName(i32 stage);
+    static const char *GetCharacterName(i32 character);
+    static void WriteScore(ResultScreen *resultScreen);
+    static void LogScoreDataToFile(ResultScreen *resultScreen);
+    i32 InsertScore(Hscr *score, i32 difficulty, i32 character);
+    void FreeScoreNodes(i32 difficulty, i32 character);
+    i32 HandleCategorySelectScreen();
+
+    void SetState(ResultScreenState state)
+    {
+        this->previousState = this->currentState;
+        this->currentState = state;
+        this->currentState2 = state;
+        this->statePhase = 0;
+        this->statePhaseTimer = 0;
+        this->frameTimer = 0;
+        this->isExitingSpellcardResults = 0;
+    }
+
+    i32 HandleHighScoreDifficultySelect();
+    i32 HandleHighScoreCharacterSelect();
+    i32 HandleHighScoreScreen();
+    i32 HandleSpellCardDifficultySelect();
+    i32 HandleSpellCardCharacterSelect();
+    i32 HandleSpellCardScreen();
+    i32 HandleResultKeyboard();
+
+    static void FormatDate(char *buffer);
+
+    i32 HandleReplaySaveKeyboard();
+    ZunResult CheckConfirmButton();
+    i32 HandleOtherStatsScreen();
+    i32 DrawFinalStats();
+
+    // Keep the u32 parameter for the original VC7 ABI; callers use the
+    // ResultScreenRegistrationMode values above.
+    static ZunResult RegisterChain(u32 registrationMode);
+    static ChainCallbackResult OnUpdate(ResultScreen *resultScreen);
+    static ChainCallbackResult OnDraw(ResultScreen *resultScreen);
+    static ZunResult AddedCallback(ResultScreen *resultScreen);
+    static ZunResult DeletedCallback(ResultScreen *resultScreen);
+
+    static i32 MoveCursor(ResultScreen *resultScreen, i32 length);
+    static i32 MoveShotTypeCursor(ResultScreen *resultScreen, i32 length);
+    static i32 MoveCursorHorizontally(ResultScreen *resultScreen, i32 length);
+
+    ScoreDat *scoreDat;
+    i32 frameTimer;
+    ResultScreenState currentState;
+
+    ResultScreenState currentState2;
+    i32 statePhase;
+    ResultScreenState previousState;
+    i32 statePhaseTimer;
+    i32 cursor;
+    i32 scoreLoadResetWord20;
+    i32 unconsumedDword24;
+    i32 selectedReplay;
+    i32 keyboardSelection;
+    i32 shotTypeCursor;
+    i32 previousShotType;
+    ZunBool updateSpellcardResults;
+    i32 selectedHighScoreCharacter;
+    i32 spellcardPage;
+    i32 selectedDifficulty;
+    i32 selectedSpellcardDifficulty;
+
+    i32 cheatCodeStep;
+    ZunBool hasSavedLastName;
+
+    ZunBool isExitingSpellcardResults;
+
+    char lastName[9];
+
+    i32 capturedSpellCards[MAX_DIFFICULTIES + 1][SHOT_ALL + 1];
+
+    u8 lastDisplayedTotalSeconds;
+
+    AnmVm spriteVms[72];
+    AnmVm textVms[30];
+    AnmVm resetOnlyVm10EF8;
+    AnmVm listingDividerSprite;
+
+    AnmLoaded *resultAnm;
+    AnmLoaded *resultTextAnm;
+
+    u32 unconsumedDword11448;
+
+    ScoreListNode scores[MAX_DIFFICULTIES][SHOT_ALL];
+    Hscr defaultScore[MAX_DIFFICULTIES][SHOT_ALL][MAX_STAGES_AND_LAST_WORD];
+    Hscr hscr;
+    Th8k fileHeader;
+    Lsnm lsnm;
+
+    ChainElem *calcChain;
+    ChainElem *drawChain;
+
+    ReplayData replays[RESULT_REPLAY_MAX_RESULTS];
+    ReplayData currentReplay;
+};
+
+C_ASSERT(sizeof(ResultScreen) == 0x477b0);
+C_ASSERT(offsetof(ResultScreen, statePhase) == 0x10);
+C_ASSERT(offsetof(ResultScreen, statePhaseTimer) == 0x18);
+C_ASSERT(offsetof(ResultScreen, scoreLoadResetWord20) == 0x20);
+C_ASSERT(offsetof(ResultScreen, keyboardSelection) == 0x2c);
+C_ASSERT(offsetof(ResultScreen, hasSavedLastName) == 0x50);
+C_ASSERT(offsetof(ResultScreen, isExitingSpellcardResults) == 0x54);
+C_ASSERT(offsetof(ResultScreen, lastDisplayedTotalSeconds) == 0x19c);
+C_ASSERT(offsetof(ResultScreen, resetOnlyVm10EF8) == 0x10EF8);
+C_ASSERT(offsetof(ResultScreen, unconsumedDword11448) == 0x11448);
+
+}; // namespace th08

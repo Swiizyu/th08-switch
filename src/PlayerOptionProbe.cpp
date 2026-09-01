@@ -1,0 +1,679 @@
+#include "th_pch.h"
+
+#include "AsciiManager.hpp"
+#include "Background.hpp"
+#include "BulletManager.hpp"
+#include "Gui.hpp"
+#include "ItemManager.hpp"
+#include "AnmManager.hpp"
+#include "Player.hpp"
+#include "SoundPlayer.hpp"
+#include "ReplayManager.hpp"
+#include "EnemyManager.hpp"
+#include "Spellcard.hpp"
+#include "EclManager.hpp"
+#include "EclOperands.hpp"
+#include "ScreenEffect.hpp"
+#include "utils.hpp"
+
+namespace th08
+{
+
+// Claim-safe exact owners for the in-progress Player TU.
+i32 __fastcall UpdateModeSensitiveOrbitingOption(Player *player, PlayerOptionState *option)
+{
+    Float3 desired;
+
+    switch (option->lifecycleState)
+    {
+    case PLAYER_OPTION_INITIALIZING:
+        player->anmFile->SetAndExecuteScriptIdx(&option->vm, 24);
+        option->lifecycleState = PLAYER_OPTION_ACTIVE;
+        option->target = player->position;
+        switch (option->optionIndex)
+        {
+        case 0:
+            option->target.x -= 30.0f;
+            option->target.y -= 16.0f;
+            option->orbitAngle = 0.0f;
+            break;
+        case 1:
+            option->target.x -= 10.0f;
+            option->target.y -= 32.0f;
+            option->orbitAngle = ZUN_PI;
+            break;
+        case 2:
+            option->target.x += 10.0f;
+            option->target.y -= 32.0f;
+            option->orbitAngle = 0.0f;
+            break;
+        case 3:
+            option->target.x += 30.0f;
+            option->target.y -= 16.0f;
+            option->orbitAngle = ZUN_PI;
+            break;
+        default:
+            break;
+        }
+        // Fall through into the orbit update.
+    case PLAYER_OPTION_ACTIVE:
+        if (option->timer > 12)
+        {
+            switch (option->optionIndex)
+            {
+            case 0:
+                option->orbitAngle = AddNormalizeAngle(option->orbitAngle, 0.02617993950843811f);
+                break;
+            case 1:
+                option->orbitAngle = AddNormalizeAngle(option->orbitAngle, -0.03490658476948738f);
+                break;
+            case 2:
+                option->orbitAngle = AddNormalizeAngle(option->orbitAngle, 0.03490658476948738f);
+                break;
+            case 3:
+                option->orbitAngle = AddNormalizeAngle(option->orbitAngle, -0.02617993950843811f);
+                break;
+            default:
+                break;
+            }
+        }
+
+        option->vm.color1.d3dColor = 0xFFFF8080;
+        option->position.FromAngleMagnitude(option->orbitAngle, 8.0f);
+        if (player->focusMode == PLAYER_FOCUS_MODE_UNFOCUSED)
+        {
+            desired = player->position;
+            option->vm.color1.d3dColor = 0xFF80FFFF;
+            switch (option->optionIndex)
+            {
+            case 0:
+                desired.x -= 30.0f;
+                desired.y -= 16.0f;
+                break;
+            case 1:
+                desired.x -= 10.0f;
+                desired.y -= 32.0f;
+                break;
+            case 2:
+                desired.x += 10.0f;
+                desired.y -= 32.0f;
+                break;
+            case 3:
+                desired.x += 30.0f;
+                desired.y -= 16.0f;
+                break;
+            default:
+                break;
+            }
+            option->target = (desired - option->target) * 0.2f + option->target;
+        }
+        option->position += option->target;
+        option->position.z = 0.0f;
+        g_EffectManager.SpawnEffect(
+            47, reinterpret_cast<D3DXVECTOR3 *>(&option->position), 1, 0x80602050);
+        break;
+
+    case PLAYER_OPTION_EXITING:
+        if (option->timer == 0)
+            option->vm.SetInterrupt(5);
+        if (option->timer > 16)
+        {
+            option->lifecycleState = PLAYER_OPTION_INACTIVE;
+            option->updateCallback = NULL;
+            option->renderCallback = NULL;
+        }
+        break;
+    }
+    return 0;
+}
+
+#pragma var_order(angleDifference, targetAngle)
+i32 __fastcall UpdateFacingTrailOption(Player *player, PlayerOptionState *option)
+{
+    f32 targetAngle;
+    f32 angleDifference;
+
+    switch (option->lifecycleState)
+    {
+    case PLAYER_OPTION_INITIALIZING:
+        player->anmFile->SetAndExecuteScriptIdx(&option->vm, 21);
+        option->lifecycleState = PLAYER_OPTION_ACTIVE;
+        option->target = player->positionHistory[15];
+        option->orbitAngle = 0.0f;
+        option->facingAngle = -ZUN_PI / 2.0f;
+        // Fall through into the normal update.
+    case PLAYER_OPTION_ACTIVE:
+        option->orbitAngle = AddNormalizeAngle(option->orbitAngle, 0.052359879016876221f);
+        option->position.FromAngleMagnitude(option->orbitAngle, 8.0f);
+        option->target = (player->positionHistory[15] - option->target) * 0.05f + option->target;
+        option->position += option->target;
+        option->position.z = 0.0f;
+        g_EffectManager.SpawnEffect(
+            47, reinterpret_cast<D3DXVECTOR3 *>(&option->position), 1, 0x80405080);
+
+        switch (player->movementDirection)
+        {
+        case PLAYER_DIRECTION_NONE:
+            goto optionUpdateDone;
+        case PLAYER_DIRECTION_UP:
+            targetAngle = ZUN_PI / 2.0f;
+            break;
+        case PLAYER_DIRECTION_DOWN:
+            targetAngle = -ZUN_PI / 2.0f;
+            break;
+        case PLAYER_DIRECTION_LEFT:
+            targetAngle = 0.0f;
+            break;
+        case PLAYER_DIRECTION_RIGHT:
+            targetAngle = ZUN_PI;
+            break;
+        case PLAYER_DIRECTION_UP_LEFT:
+            targetAngle = ZUN_PI / 4.0f;
+            break;
+        case PLAYER_DIRECTION_UP_RIGHT:
+            targetAngle = 3.0f * ZUN_PI / 4.0f;
+            break;
+        case PLAYER_DIRECTION_DOWN_LEFT:
+            targetAngle = -ZUN_PI / 4.0f;
+            break;
+        case PLAYER_DIRECTION_DOWN_RIGHT:
+            targetAngle = -3.0f * ZUN_PI / 4.0f;
+            break;
+        default:
+            break;
+        }
+
+        angleDifference = fabsf(option->facingAngle - targetAngle);
+        if (angleDifference > ZUN_PI)
+        {
+            targetAngle += option->facingAngle > targetAngle ? ZUN_2PI : -ZUN_2PI;
+            angleDifference = fabsf(option->facingAngle - targetAngle);
+        }
+        if (angleDifference > ZUN_PI / 2.0f)
+        {
+            option->facingAngle = targetAngle;
+        }
+        else
+        {
+            option->facingAngle = AddNormalizeAngle(
+                (targetAngle - option->facingAngle) * 0.07f, option->facingAngle);
+        }
+optionUpdateDone:
+        break;
+
+    case PLAYER_OPTION_EXITING:
+        if (option->timer == 0)
+            option->vm.SetInterrupt(5);
+        if (option->timer > 16)
+        {
+            option->lifecycleState = PLAYER_OPTION_INACTIVE;
+            option->updateCallback = NULL;
+            option->renderCallback = NULL;
+        }
+        break;
+    }
+    return 0;
+}
+
+
+#pragma var_order(angleDifference, targetAngle)
+i32 __fastcall UpdateModeSensitiveFacingOption(Player *player, PlayerOptionState *option)
+{
+    f32 targetAngle;
+    f32 angleDifference;
+
+    switch (option->lifecycleState)
+    {
+    case PLAYER_OPTION_INITIALIZING:
+        player->anmFile->SetAndExecuteScriptIdx(&option->vm, 21);
+        option->lifecycleState = PLAYER_OPTION_ACTIVE;
+        option->target = player->positionHistory[15];
+        option->orbitAngle = 0.0f;
+        option->facingAngle = -ZUN_PI / 2.0f;
+        // Fall through into the normal update.
+    case PLAYER_OPTION_ACTIVE:
+        option->orbitAngle = AddNormalizeAngle(option->orbitAngle, 0.052359879016876221f);
+        option->position.FromAngleMagnitude(option->orbitAngle, 8.0f);
+        option->target = (player->positionHistory[15] - option->target) * 0.05f + option->target;
+        option->position += option->target;
+        option->position.z = 0.0f;
+        option->vm.color1.d3dColor = 0xFFFF8080;
+
+        if (player->focusMode == PLAYER_FOCUS_MODE_UNFOCUSED)
+        {
+            option->vm.color1.d3dColor = 0xFFFFFFFF;
+            switch (player->movementDirection)
+            {
+            case PLAYER_DIRECTION_NONE:
+                goto optionUpdateDone;
+            case PLAYER_DIRECTION_UP:
+                targetAngle = ZUN_PI / 2.0f;
+                break;
+            case PLAYER_DIRECTION_DOWN:
+                targetAngle = -ZUN_PI / 2.0f;
+                break;
+            case PLAYER_DIRECTION_LEFT:
+                targetAngle = 0.0f;
+                break;
+            case PLAYER_DIRECTION_RIGHT:
+                targetAngle = ZUN_PI;
+                break;
+            case PLAYER_DIRECTION_UP_LEFT:
+                targetAngle = ZUN_PI / 4.0f;
+                break;
+            case PLAYER_DIRECTION_UP_RIGHT:
+                targetAngle = 3.0f * ZUN_PI / 4.0f;
+                break;
+            case PLAYER_DIRECTION_DOWN_LEFT:
+                targetAngle = -ZUN_PI / 4.0f;
+                break;
+            case PLAYER_DIRECTION_DOWN_RIGHT:
+                targetAngle = -3.0f * ZUN_PI / 4.0f;
+                break;
+            default:
+                break;
+            }
+
+            angleDifference = fabsf(option->facingAngle - targetAngle);
+            if (angleDifference > ZUN_PI)
+            {
+                targetAngle += option->facingAngle > targetAngle ? ZUN_2PI : -ZUN_2PI;
+                angleDifference = fabsf(option->facingAngle - targetAngle);
+            }
+            if (angleDifference > ZUN_PI / 2.0f)
+            {
+                option->facingAngle = targetAngle;
+            }
+            else
+            {
+                option->facingAngle = AddNormalizeAngle(
+                    (targetAngle - option->facingAngle) * 0.07f, option->facingAngle);
+            }
+
+            g_EffectManager.SpawnEffect(
+                47, reinterpret_cast<D3DXVECTOR3 *>(&option->position), 1, 0x80405080);
+        }
+        else
+        {
+            g_EffectManager.SpawnEffect(
+                47, reinterpret_cast<D3DXVECTOR3 *>(&option->position), 1, 0xFFF05080);
+        }
+optionUpdateDone:
+        break;
+
+    case PLAYER_OPTION_EXITING:
+        if (option->timer == 0)
+            option->vm.SetInterrupt(5);
+        if (option->timer > 16)
+        {
+            option->lifecycleState = PLAYER_OPTION_INACTIVE;
+            option->updateCallback = NULL;
+            option->renderCallback = NULL;
+        }
+        break;
+    }
+    return 0;
+}
+
+i32 __fastcall UpdateTwinOrbitingOption(Player *player, PlayerOptionState *option)
+{
+    Float3 base = player->position;
+
+    switch (option->lifecycleState)
+    {
+    case PLAYER_OPTION_INITIALIZING:
+        player->anmFile->SetAndExecuteScriptIdx(&option->vm, 21);
+        option->lifecycleState = PLAYER_OPTION_ACTIVE;
+        option->target = base;
+        switch (option->optionIndex)
+        {
+        case 0:
+            option->orbitAngle = 0.0f;
+            break;
+        case 1:
+            option->orbitAngle = -ZUN_PI;
+            break;
+        default:
+            break;
+        }
+        // Fall through.
+    case PLAYER_OPTION_ACTIVE:
+        switch (option->optionIndex)
+        {
+        case 0:
+            base.x -= 32.0f;
+            option->orbitAngle = AddNormalizeAngle(option->orbitAngle, 0.052359879016876221f);
+            break;
+        case 1:
+            base.x += 32.0f;
+            option->orbitAngle = AddNormalizeAngle(option->orbitAngle, -0.052359879016876221f);
+            break;
+        default:
+            break;
+        }
+
+        option->position.FromAngleMagnitude(option->orbitAngle, 6.0f);
+        option->target = (base - option->target) * 0.09f + option->target;
+        option->position += option->target;
+        option->position.z = 0.0f;
+        g_EffectManager.SpawnEffect(
+            47, reinterpret_cast<D3DXVECTOR3 *>(&option->position), 1, 0x80602050);
+        break;
+
+    case PLAYER_OPTION_EXITING:
+        if (option->timer == 0)
+            option->vm.SetInterrupt(5);
+        if (option->timer > 16)
+        {
+            option->lifecycleState = PLAYER_OPTION_INACTIVE;
+            option->updateCallback = NULL;
+            option->renderCallback = NULL;
+        }
+        break;
+    }
+    return 0;
+}
+
+
+#pragma var_order(magnitude, angle)
+i32 __fastcall SpawnShotAlongPlayerAngle(Player *player, PlayerShot *slot, i32 value,
+                                         PlayerShotDescriptor *entry)
+{
+    f32 angle;
+    f32 magnitude;
+
+    if (value % entry->fireInterval == entry->fireFrame)
+    {
+        player->InitializeShot(slot, entry);
+        angle = AddNormalizeAngle(player->baseShotAngle, entry->angle + ZUN_PI / 2.0f);
+        magnitude = entry->speed;
+        reinterpret_cast<Float3 *>(&slot->velocity)->FromAngleMagnitude(angle, magnitude);
+        slot->angle = angle;
+        return 1;
+    }
+    return 0;
+}
+
+#pragma var_order(magnitude, angle)
+i32 __fastcall SpawnShotAlongOptionAngle(Player *player, PlayerShot *slot, i32 value,
+                                         PlayerShotDescriptor *entry)
+{
+    f32 angle;
+    f32 magnitude;
+
+    if (player->bombState.isInUse == 0 &&
+        value % entry->fireInterval == entry->fireFrame)
+    {
+        player->InitializeShot(slot, entry);
+        angle = AddNormalizeAngle(player->optionStates[2].facingAngle, entry->angle);
+        magnitude = entry->speed;
+        reinterpret_cast<Float3 *>(&slot->velocity)->FromAngleMagnitude(angle, magnitude);
+        slot->angle = angle;
+        return 1;
+    }
+    return 0;
+}
+
+i32 __fastcall SpawnRandomizedShot(Player *player, PlayerShot *slot, i32 value,
+                                   PlayerShotDescriptor *entry)
+{
+    if (value % entry->fireInterval == entry->fireFrame)
+    {
+        player->InitializeShot(slot, entry);
+        slot->angle = g_Rng.GetRandomF32() * ZUN_PI / 48.0f - ZUN_PI / 2.0f;
+        reinterpret_cast<Float3 *>(&slot->velocity)->FromAngleMagnitude(slot->angle, entry->speed);
+        return 1;
+    }
+    return 0;
+}
+
+#pragma var_order(magnitude, angle)
+i32 __fastcall SpawnHomingShot(Player *player, PlayerShot *slot, i32 value,
+                               PlayerShotDescriptor *entry)
+{
+    f32 angle;
+    f32 magnitude;
+
+    if (value % entry->fireInterval == entry->fireFrame)
+    {
+        player->InitializeShot(slot, entry);
+        if (player->optionHomingTarget != NULL)
+        {
+            angle = AddNormalizeAngle(
+                VectorAngle(player->optionHomingTarget->position.y - slot->position.y,
+                            player->optionHomingTarget->position.x - slot->position.x),
+                entry->angle + ZUN_PI / 2.0f);
+            magnitude = entry->speed * 1.5f;
+            reinterpret_cast<Float3 *>(&slot->velocity)->FromAngleMagnitude(angle, magnitude);
+            slot->angle = angle;
+        }
+        return 1;
+    }
+    return 0;
+}
+
+
+#pragma var_order(yDelta, xDelta, magnitude)
+i32 __fastcall UpdateHomingShot(Player *player, PlayerShot *slot)
+{
+    f32 xDelta;
+    f32 yDelta;
+    f32 magnitude;
+    if (slot->state == 1)
+    {
+        if (player->tailPosition0.x > -100.0f && (i32)slot->timer < 40 && slot->timer.HasTicked())
+        {
+            xDelta = player->tailPosition0.x - slot->position.operator float *()[0];
+            yDelta = player->tailPosition0.y - slot->position.operator float *()[1];
+            magnitude = sqrtf(xDelta * xDelta + yDelta * yDelta) / (slot->speed / 4.0f);
+            if (magnitude < 1.0f) magnitude = 1.0f;
+            xDelta = xDelta / magnitude + slot->velocity.x;
+            yDelta = yDelta / magnitude + slot->velocity.y;
+            magnitude = sqrtf(xDelta * xDelta + yDelta * yDelta);
+            slot->speed = magnitude > 10.0f ? 10.0f : magnitude;
+            if (slot->speed < 1.0f) slot->speed = 1.0f;
+            slot->velocity.x = xDelta * slot->speed / magnitude;
+            slot->velocity.y = yDelta * slot->speed / magnitude;
+        }
+        else if (slot->speed < 10.0f)
+        {
+            slot->speed += 1.0f / 3.0f;
+            xDelta = slot->velocity.x;
+            yDelta = slot->velocity.y;
+            magnitude = sqrtf(xDelta * xDelta + yDelta * yDelta);
+            slot->velocity.x = xDelta * slot->speed / magnitude;
+            slot->velocity.y = yDelta * slot->speed / magnitude;
+        }
+    }
+    slot->angle = VectorAngle(slot->velocity.y, slot->velocity.x);
+    return 0;
+}
+
+
+i32 __fastcall UpdateFallingShot(Player *player, PlayerShot *slot)
+{
+    if (slot->state == 1)
+        slot->velocity.y -= g_Rng.GetRandomF32InRange(0.1f) + 0.27f;
+    return 0;
+}
+
+
+i32 __fastcall UpdatePersistentShot(Player *player, PlayerShot *slot)
+{
+    if (player->timelines[slot->timelineIndex].instruction !=
+        reinterpret_cast<EclTimelineInstruction *>(slot))
+    {
+        if (slot->vm.IsStopped()) slot->vm.pendingInterrupt = 1;
+    }
+    if (g_Gui.IsDialoguePresent() || player->bombState.isInUse != 0 || g_GameManager.flags.suppressPlayerShots)
+    {
+        if ((i32)player->timelines[slot->timelineIndex].timer > 20)
+            player->timelines[slot->timelineIndex].timer = 20;
+    }
+    if (player->timelines[slot->timelineIndex].timer <= 0)
+    {
+        player->timelines[slot->timelineIndex].timer = 0;
+        player->timelines[slot->timelineIndex].instruction = NULL;
+        slot->state = 0;
+        return 1;
+    }
+    if (player->timelines[slot->timelineIndex].timer <= 70)
+    {
+        if (slot->vm.IsStopped()) slot->vm.pendingInterrupt = 1;
+    }
+    slot->position.x += slot->velocity.z;
+    slot->position.z = 0.44f;
+    if (player->playerState == PLAYER_STATE_DYING) return 1;
+    slot->vm.scale.y = slot->position.y / 14.0f;
+    slot->hitboxSize.y = slot->position.y;
+    slot->position.y /= 2.0f;
+    if (player->timelines[slot->timelineIndex].timer < 100)
+        player->timelines[slot->timelineIndex].timer--;
+    if (g_GameManager.GaugeIsExtremelyYoukai())
+    {
+        slot->vm.color1.r = 0xFF; slot->vm.color1.g = 0xD0; slot->vm.color1.b = 0xB0;
+    }
+    else
+    {
+        slot->vm.color1.r = 0xFF; slot->vm.color1.g = 0xFF; slot->vm.color1.b = 0xFF;
+    }
+    return 0;
+}
+
+
+#pragma var_order(damageSlot, i)
+i32 __fastcall UpdateShotTrail(Player *player, PlayerShot *slot)
+{
+    PlayerCollisionRegion *damageSlot;
+    i32 i;
+    if (player->timelines[slot->timelineIndex].instruction !=
+            reinterpret_cast<EclTimelineInstruction *>(slot) ||
+        g_Gui.IsDialoguePresent() ||
+        (i32)player->shotTimer < 0 ||
+        player->playerState == PLAYER_STATE_DYING ||
+        player->bombState.isInUse != 0 ||
+        g_GameManager.flags.suppressPlayerShots)
+    {
+        slot->vm.pendingInterrupt = 1;
+        player->timelines[slot->timelineIndex].instruction = NULL;
+        slot->updateCallback = NULL;
+    }
+    if (player->optionStates[0].lifecycleState == PLAYER_OPTION_INACTIVE)
+    {
+        player->timelines[slot->timelineIndex].instruction = NULL;
+        return 1;
+    }
+    for (i = 0; i < slot->trailSegmentCount; i++)
+    {
+        if (slot->positionHistory[i * 2].x >= -900.0f)
+        {
+            damageSlot = player->CreateRectDamageRegion(&slot->positionHistory[i * 2], 16.0f, 448.0f, 1, 0);
+            damageSlot->mode = 1;
+        }
+    }
+    for (i = 31; i > 0; i--)
+    {
+        slot->positionHistory[i] = slot->positionHistory[i - 1];
+        slot->positionHistory[i].y -= 1.0f;
+    }
+    slot->positionHistory[0] = slot->position;
+    slot->position = player->optionStates[0].position;
+    slot->position.z = 0.44f;
+    slot->hitboxSize.y = 448.0f;
+    slot->position.y -= 208.0f;
+    if (g_GameManager.GaugeIsExtremelyYoukai())
+    {
+        slot->vm.color1.r = 0xFF; slot->vm.color1.g = 0xD0; slot->vm.color1.b = 0xB0;
+    }
+    else
+    {
+        slot->vm.color1.r = 0xFF; slot->vm.color1.g = 0xFF; slot->vm.color1.b = 0xFF;
+    }
+    return 0;
+}
+
+
+#pragma var_order(color, i, originalColor)
+i32 __fastcall DrawShotTrail(Player *player, PlayerShot *slot)
+{
+    i32 color;
+    i32 i;
+    i32 originalColor;
+
+    color = slot->vm.color1.a;
+    originalColor = color;
+    color = color * 3 / 4;
+    for (i = 0; i < slot->trailSegmentCount * 2; i += 2)
+    {
+        if (slot->positionHistory[i].x == -999.0f)
+            break;
+        slot->vm.pos.x = slot->positionHistory[i].x;
+        slot->vm.pos.y = slot->positionHistory[i].y;
+        slot->vm.pos.z = slot->positionHistory[i].z;
+        if (i != 0)
+            slot->vm.color1.a = color - ((color / 2) * i) / slot->trailSegmentCount;
+        slot->vm.pos.x += g_GameManager.arcadeRegionTopLeftPos.x;
+        slot->vm.pos.y += g_GameManager.arcadeRegionTopLeftPos.y;
+        if (g_GameManager.GaugeIsExtremelyYoukai())
+        {
+            slot->vm.color1.r = 0xFF;
+            slot->vm.color1.g = 0x40;
+            slot->vm.color1.b = 0x40;
+        }
+        g_AnmManager->Draw2D(&slot->vm);
+    }
+    slot->vm.color1.a = originalColor;
+    return 0;
+}
+
+
+i32 __fastcall ApplyShotHitBehavior(Player *player, PlayerShot *slot, Float3 *effectPosition)
+{
+    f32 angle;
+
+    if (slot->state == 2)
+    {
+        if ((i32)slot->timer % 2 != 0)
+            return 1;
+        if (g_Spellcard.IsActive() && (i32)slot->timer % 4 != 0)
+            return 1;
+        slot->damage /= 3;
+        if (slot->damage == 0)
+            slot->damage = 1;
+        slot->velocity.x *= 0.88f;
+        slot->velocity.y *= 0.88f;
+    }
+    else
+    {
+        angle = g_Rng.GetRandomF32InRange(ZUN_PI / 2.0f) - 3.0f * ZUN_PI / 4.0f;
+        switch (slot->vm.scriptIndex)
+        {
+        case 12: slot->hitboxSize.x = 48.0f; slot->hitboxSize.y = 48.0f; reinterpret_cast<Float3 *>(&slot->velocity)->FromAngleMagnitude(angle, 6.0f); break;
+        case 14: slot->hitboxSize.x = 64.0f; slot->hitboxSize.y = 64.0f; reinterpret_cast<Float3 *>(&slot->velocity)->FromAngleMagnitude(angle, 6.0f); break;
+        case 16: slot->hitboxSize.x = 80.0f; slot->hitboxSize.y = 80.0f; reinterpret_cast<Float3 *>(&slot->velocity)->FromAngleMagnitude(angle, 6.0f); break;
+        case 18: slot->hitboxSize.x = 96.0f; slot->hitboxSize.y = 96.0f; reinterpret_cast<Float3 *>(&slot->velocity)->FromAngleMagnitude(angle, 6.0f); break;
+        case 20: slot->hitboxSize.x = 128.0f; slot->hitboxSize.y = 128.0f; reinterpret_cast<Float3 *>(&slot->velocity)->FromAngleMagnitude(angle, 6.0f); break;
+        default: break;
+        }
+    }
+    if ((i32)slot->timer % 6 == 0)
+        g_EffectManager.SpawnEffect(5, reinterpret_cast<D3DXVECTOR3 *>(effectPosition), 1, -1);
+    return 0;
+}
+
+
+i32 __fastcall SpawnPeriodicShotHitEffect(Player *player, PlayerShot *slot,
+                                          Float3 *effectPosition)
+{
+    player->shotHitEffectCounter++;
+    if (player->shotHitEffectCounter % 8 == 0)
+    {
+        Float3 position;
+        position = *effectPosition;
+        position.x = slot->position.x;
+        g_EffectManager.SpawnEffect(5, reinterpret_cast<D3DXVECTOR3 *>(&position), 1, -1);
+    }
+    return 0;
+}
+
+} // namespace th08

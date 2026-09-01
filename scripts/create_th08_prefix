@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+
+set -e
+
+SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+
+# Allow overriding the wine binary used by providing the WINE environment
+# variable.
+WINE=${WINE:-wine}
+
+# Toolchain setup is headless.  Prevent Wine/WSLg integration from opening
+# windows or installing desktop/menu entries on the host.
+unset DISPLAY WAYLAND_DISPLAY
+export WINEDLLOVERRIDES="winemenubuilder.exe=d;${WINEDLLOVERRIDES:-}"
+
+# Use a brand new prefix to avoid issues.
+export WINEPREFIX=$HOME/.wineth08
+# For use by crossover wine if crossover is used.
+export CX_BOTTLE=th08
+# Disable wine logs (comment me for debugging)
+export WINEDEBUG=-all
+
+MAIN_DRIVE_PATH=$SCRIPT_DIR/prefix
+
+$WINE wineboot --init
+
+mkdir -p $MAIN_DRIVE_PATH
+
+echo "Creating devenv in $MAIN_DRIVE_PATH"
+# #@ is used to pass all arguments to the python script
+python3 $SCRIPT_DIR/create_devenv.py $SCRIPT_DIR/dls $MAIN_DRIVE_PATH $@
+
+echo "DONE"

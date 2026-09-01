@@ -42,7 +42,7 @@ sd:/switch/th08/
     └── msgothic.ttc          # Japanese font (ships with the Windows release)
 ```
 
-The loader also accepts `sd:/th08/`, `sd:/touhou8/`, `sd:/switch/touhou8/`, `sd:/games/th08/`, `sd:/roms/th08/` and `imperishable night` / `in` variants, in any capitalisation — or simply the folder the NRO was launched from.
+The loader also accepts `sd:/th08/`, `sd:/touhou8/`, `sd:/switch/touhou8/`, `sd:/games/th08/`, `sd:/roms/th08/` in any capitalisation — or simply the folder the NRO was launched from.
 
 ### 2. Music
 
@@ -71,7 +71,7 @@ Every other button is intentionally inert. The layout is fixed in code rather th
 
 ## ⚠️ Known Issues
 
-The game is **playable** from the main menu to the endings, including all teams, stages, Extra, practice mode and replays. A few issues are known — all of them are inherited from the upstream decompilation rather than the Switch layer (they reproduce identically in the upstream web build of the same source):
+while the game is **playable**. A few issues are known - all of them are inherited from the upstream decompilation rather than the Switch layer (they reproduce identically in the upstream web build of the same source):
 
 - The **pre-boss dialogue** plays over a solid black background instead of the stage behind it.
 - **Background flickering** on one of the stages.

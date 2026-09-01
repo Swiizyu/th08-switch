@@ -59,8 +59,8 @@ Run `touhou08.nro` from the **Homebrew Menu (hbmenu)**, **Sphaira launcher**, or
 | Nintendo Switch Button | Action |
 | :-- | :-- |
 | **Left Stick / D-Pad** | Character Movement |
-| **A** | Shoot / Confirm |
-| **B** | Bomb / Cancel |
+| **B** | Shoot / Confirm |
+| **A** | Bomb / Cancel |
 | **L** | Focus (Precision Slow-Motion Movement) |
 | **R** | Skip Dialogue (hold) |
 | **+ (Plus)** | Pause / In-Game Menu |

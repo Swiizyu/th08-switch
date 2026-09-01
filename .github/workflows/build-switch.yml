@@ -24,7 +24,7 @@ jobs:
         run: |
           export DEVKITPRO=/opt/devkitpro
           export DEVKITA64=/opt/devkitpro/devkitA64
-         bash scripts/build_switch.sh
+          bash scripts/build_switch.sh
 
       - name: Rename NRO
         run: cp build-switch/th08.nro touhou08.nro
